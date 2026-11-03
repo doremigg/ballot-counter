@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>选票自动计票</title>
+<style>
+  :root{--bg:#f4f6f9;--card:#fff;--line:#e3e8ef;--ink:#1c2733;--muted:#6b7a8c;
+        --green:#16a34a;--red:#dc2626;--gray:#64748b;--blue:#2563eb;--orange:#d97706}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;background:var(--bg);color:var(--ink);padding:18px}
+  .topbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-bottom:14px}
+  .topbar h1{font-size:18px;margin-right:auto}
+  .badge{padding:4px 12px;border-radius:999px;font-size:13px;background:#e2e8f0;color:var(--muted)}
+  .badge.run{background:#dcfce7;color:var(--green)}
+  button{font:inherit;font-size:13.5px;border-radius:8px;border:1px solid var(--line);background:var(--card);padding:7px 12px;cursor:pointer}
+  button.primary{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:600}
+  button.danger{color:var(--red);border-color:#fca5a5}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .stat .k{font-size:12.5px;color:var(--muted)} .stat .v{font-size:26px;font-weight:700}
+  .grid{display:grid;grid-template-columns:1.15fr 1fr;gap:14px}
+  @media(max-width:980px){.grid{grid-template-columns:1fr}}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .panel h2{font-size:14px;color:var(--muted);margin-bottom:10px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:6px 7px;border-bottom:1px solid var(--line);text-align:left}
+  th{color:var(--muted);font-weight:600}
+  .pill{padding:2px 8px;border-radius:999px;font-size:11.5px;color:#fff;font-weight:600}
+  .pill.有效{background:var(--green)} .pill.无效{background:var(--red)}
+  .pill.弃权{background:var(--gray)} .pill.待人工{background:var(--orange)}
+  .cm{display:inline-block;min-width:22px;text-align:center;margin-right:3px;padding:1px 4px;border-radius:5px;font-size:12px;border:1px solid var(--line)}
+  .cm.○,.cm.√{color:var(--green)} .cm.×{color:var(--red)} .cm.空{color:var(--gray)} .cm.涂实{color:var(--red);background:#fef2f2}
+  img.preview{max-width:100%;border:1px solid var(--line);border-radius:8px}
+  .log{background:#0f172a;color:#cbd5e1;border-radius:8px;padding:10px;font-family:Consolas,monospace;font-size:12px;height:200px;overflow:auto;white-space:pre-wrap}
+  .pager{display:flex;gap:8px;align-items:center;margin-top:10px;font-size:13px;color:var(--muted)}
+  .progress{height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;margin-bottom:8px}
+  .progress > i{display:block;height:100%;background:var(--green);width:0}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>🗳️ 选票自动计票</h1>
+    <span class="badge" id="status">待机</span>
+    <span id="total" style="color:var(--muted);font-size:13px">已处理 0 张</span>
+    <button class="primary" id="btnScan">扫描并计票</button>
+    <button id="btnProc">处理已扫描图片</button>
+    <button id="btnStop" disabled>停止</button>
+    <button onclick="location.href='/writeins'">另选他人录入</button>
+    <button id="btnExport">导出 CSV</button>
+    <button class="danger" id="btnReset">清空</button>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="k">有效票</div><div class="v" id="stV" style="color:var(--green)">0</div></div>
+    <div class="stat"><div class="k">无效票</div><div class="v" id="stI" style="color:var(--red)">0</div></div>
+    <div class="stat"><div class="k">弃权票</div><div class="v" id="stA" style="color:var(--gray)">0</div></div>
+    <div class="stat"><div class="k">待人工</div><div class="v" id="stM" style="color:var(--orange)">0</div></div>
+    <div class="stat"><div class="k">另选他人</div><div class="v" id="stW" style="color:#7c3aed">0</div></div>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <h2>候选人计票（赞成 / 反对 / 弃权）</h2>
+      <table>
+        <thead><tr><th>候选人</th><th>赞成</th><th>反对</th><th>弃权</th></tr></thead>
+        <tbody id="tallyBody"><tr><td colspan="4" style="color:#999">尚无数据</td></tr></tbody>
+      </table>
+
+      <h2 style="margin-top:16px">逐票明细</h2>
+      <table>
+        <thead><tr><th>票号</th><th>判定</th><th>四格状态</th><th>原始标记</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="4" style="color:#999">尚无数据</td></tr></tbody>
+      </table>
+      <div class="pager">
+        <button id="prev">上一页</button>
+        <span id="pageInfo">第 1 页</span>
+        <button id="next">下一页</button>
+        <span id="pageTotal"></span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>票面预览（透视矫正后）</h2>
+      <img class="preview" id="preview" alt="等待处理…" style="margin-bottom:10px">
+      <h2>运行日志</h2>
+      <div class="log" id="log">等待开始…</div>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:14px">
+    <h2>待人工审核 <span id="pendCount" style="color:var(--orange)">0</span> 张（点击预览查看，确认后计入/剔除）</h2>
+    <div id="pendingList" style="max-height:320px;overflow:auto;color:#999">无待审核</div>
+  </div>
+
+  <div id="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100;align-items:center;justify-content:center">
+    <div style="background:#fff;border-radius:12px;padding:16px;width:95%;max-width:940px;max-height:93vh;overflow:auto">
+      <div style="display:flex;align-items:center;margin-bottom:10px">
+        <h2 id="mTitle" style="margin-right:auto">人工审核</h2>
+        <button onclick="closeModal()">关闭</button>
+      </div>
+      <img id="mImg" style="max-width:100%;max-height:46vh;border:1px solid var(--line);border-radius:8px" alt="票面">
+      <div id="mReason" style="color:var(--muted);font-size:13px;margin:8px 0"></div>
+      <table>
+        <thead><tr><th>候选人</th><th>自动识别</th><th>实际情况（请选择）</th></tr></thead>
+        <tbody id="mBody"></tbody>
+      </table>
+      <div style="margin-top:14px;text-align:right">
+        <button onclick="closeModal()">取消</button>
+        <button class="primary" onclick="confirmReview()">确认并计入</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="imgModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:110;align-items:center;justify-content:center" onclick="closeImg()">
+    <div style="background:#fff;border-radius:12px;padding:14px;max-width:96vw;max-height:94vh;overflow:auto" onclick="event.stopPropagation()">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <h2 id="imgTitle" style="margin:0">票面</h2>
+        <a id="imgOrig" href="#" target="_blank" style="margin-left:auto;font-size:13px;color:#2563eb">查看原始扫描图 ↗</a>
+        <button onclick="closeImg()">关闭</button>
+      </div>
+      <img id="imgBig" style="max-width:92vw;max-height:78vh;border:1px solid var(--line);border-radius:8px" alt="票面">
+    </div>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+let page = 1, size = 20;
+async function post(url){ try{ const r = await fetch(url,{method:'POST'}); const j = await r.json(); if(!j.ok) alert(j.msg||'操作失败'); }catch(e){console.error(e)} }
+$("btnScan").onclick = () => post("/api/scan");
+$("btnProc").onclick = () => post("/api/process");
+$("btnStop").onclick = () => post("/api/stop");
+$("btnReset").onclick = () => { if(confirm("确定清空计数？归档文件保留")) post("/api/reset"); };
+$("btnExport").onclick = () => window.location = "/api/export.csv";
+$("prev").onclick = () => { if(page>1){ page--; loadRows(); } };
+$("next").onclick = () => { page++; loadRows(); };
+
+function marks(arr, key){ return (arr||[]).map(x=>`<span class="cm ${x}">${x}</span>`).join(""); }
+
+function renderState(s){
+  $("status").textContent = s.running ? "运行中…" : "待机";
+  $("status").className = "badge" + (s.running ? " run" : "");
+  $("total").textContent = "已处理 " + s.total + " 张";
+  $("btnScan").disabled = s.running; $("btnProc").disabled = s.running;
+  $("btnStop").disabled = !s.running; $("btnReset").disabled = s.running;
+  const t = s.tally;
+  if (t){
+    $("stV").textContent = t.counts["有效"]||0;
+    $("stI").textContent = t.counts["无效"]||0;
+    $("stA").textContent = t.counts["弃权"]||0;
+    $("stM").textContent = t.counts["待人工"]||0;
+    $("stW").textContent = t.writein_ballots||0;
+    $("tallyBody").innerHTML = Object.entries(t.candidates).map(([n,v]) =>
+      `<tr><td><b>${n}</b></td><td style="color:var(--green);font-weight:700">${v["赞成"]}</td>
+       <td style="color:var(--red)">${v["反对"]}</td><td style="color:var(--gray)">${v["弃权"]}</td></tr>`).join("");
+  }
+  if (s.last_img) $("preview").src = s.last_img + "?t=" + Date.now();
+  $("log").textContent = (s.logs||[]).join("\n");
+}
+
+async function loadRows(){
+  try{
+    const r = await fetch(`/api/results?page=${page}&size=${size}`);
+    const d = await r.json();
+    const rows = d.rows || [];
+    $("rows").innerHTML = rows.length ? rows.map(b =>
+      `<tr><td><a href="#" onclick="showBallot(${b.no},'${b.preview||''}','${b.orig||''}');return false" style="color:#2563eb;text-decoration:none;font-weight:600">#${b.no}</a></td><td><span class="pill ${b.verdict}">${b.verdict}</span></td>
+       <td>${marks(b.states)}</td><td>${marks(b.pattern)}</td></tr>`).join("")
+      : `<tr><td colspan="4" style="color:#999">尚无数据</td></tr>`;
+    const maxPage = Math.max(1, Math.ceil(d.total / size));
+    $("pageInfo").textContent = `第 ${page} 页`;
+    $("pageTotal").textContent = `共 ${d.total} 条`;
+    $("next").disabled = page >= maxPage;
+    $("prev").disabled = page <= 1;
+  }catch(e){ console.error(e); }
+}
+
+let pendRows = [];
+async function loadPending(){
+  try{
+    const d = await (await fetch("/api/pending?limit=200")).json();
+    pendRows = d.rows || [];
+    $("pendCount").textContent = pendRows.length;
+    $("pendingList").innerHTML = pendRows.length ? pendRows.map((b,i) => `
+      <div style="display:flex;gap:10px;align-items:center;border-bottom:1px solid var(--line);padding:6px 0;flex-wrap:wrap">
+        <b>#${b.no}</b>
+        <span style="color:var(--muted);font-size:12.5px">${b.reason}</span>
+        <span>${marks(b.pattern)}</span>
+        ${b.preview ? `<img src="${b.preview}" style="height:44px;border:1px solid var(--line);border-radius:4px">` : ""}
+        <span style="margin-left:auto"></span>
+        <button class="primary" onclick="openReview(pendRows[${i}])">人工审核</button>
+      </div>`).join("") : '<div style="color:#999">无待审核</div>';
+  }catch(e){}
+}
+
+let mNo = null;
+function openReview(b){
+  mNo = b.no;
+  $("mTitle").textContent = "人工审核 #" + b.no;
+  $("mImg").src = (b.preview || "") + "?t=" + Date.now();
+  $("mReason").textContent = "自动判定：" + b.verdict + " — " + b.reason;
+  const opts = ["○","√","×","空","涂实"];
+  const names = ["刘正先","李校博","杨宁","范秋筠"];
+  $("mBody").innerHTML = (b.pattern||[]).map((m,i) => `
+    <tr><td>${names[i]||i}</td>
+    <td><span class="cm ${m}">${m}</span></td>
+    <td><select data-i="${i}">${opts.map(o=>`<option value="${o}" ${o===m?"selected":""}>${o}${o==="○"||o==="√"?"（赞成）":o==="×"?"（反对）":o==="空"?"（弃权）":"（无效）"}</option>`).join("")}</select></td></tr>`).join("");
+  $("modal").style.display = "flex";
+}
+function closeModal(){ $("modal").style.display = "none"; mNo = null; }
+
+function showBallot(no, preview, orig){
+  $("imgTitle").textContent = "票面 #" + no;
+  $("imgBig").src = (preview || orig || "") + "?t=" + Date.now();
+  $("imgOrig").href = orig || preview || "#";
+  $("imgOrig").style.display = orig ? "" : "none";
+  $("imgModal").style.display = "flex";
+}
+function closeImg(){ $("imgModal").style.display = "none"; }
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeImg(); });
+async function confirmReview(){
+  const marks = [...document.querySelectorAll("#mBody select")].map(s => s.value);
+  await fetch("/api/review", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({no:mNo, marks})});
+  closeModal(); loadPending(); poll(); loadRows();
+}
+
+async function poll(){
+  try{ const s = await (await fetch("/api/state")).json(); renderState(s); }catch(e){}
+}
+setInterval(poll, 1000);
+setInterval(loadRows, 3000);
+setInterval(loadPending, 3000);
+poll(); loadRows(); loadPending();
+</script>
+</body>
+</html>
