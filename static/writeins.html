@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>另选他人姓名录入</title>
+<style>
+  :root{--line:#e2e8f0;--muted:#64748b;--green:#16a34a;--red:#dc2626}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Microsoft YaHei",system-ui,sans-serif;background:#f8fafc;color:#0f172a}
+  .top{position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid var(--line);padding:12px 18px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  .top h1{font-size:17px;margin:0}
+  .badge{background:#eef2ff;color:#4338ca;border-radius:999px;padding:3px 10px;font-size:12px}
+  button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px}
+  button.primary{background:#2563eb;color:#fff;border-color:#2563eb}
+  .wrap{padding:16px 18px;display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:14px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:8px}
+  .hd{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+  .hd b{color:#0f172a;font-size:15px}
+  .card img{width:100%;max-height:150px;object-fit:contain;border:1px solid var(--line);border-radius:8px;background:#fff}
+  .row{display:flex;gap:8px;align-items:center}
+  .row input{flex:1;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:15px}
+  .ok{color:var(--green);font-size:12px}
+  .miss{color:var(--red);font-size:12px}
+</style>
+</head>
+<body>
+<div class="top">
+  <h1>✍️ 另选他人 姓名录入</h1>
+  <span class="badge" id="cnt">加载中…</span>
+  <span class="badge" id="done" style="background:#dcfce7;color:#166534">已录入 0</span>
+  <button onclick="location.href='/'">返回计票页</button>
+</div>
+<div class="wrap" id="list"></div>
+<script>
+const $ = id => document.getElementById(id);
+const NAMES = ["刘正先","李校博","杨宁","范秋筠"];
+async function load(){
+  const d = await (await fetch('/api/writeins')).json();
+  const rows = d.rows || [];
+  let total = 0, done = 0;
+  const html = [];
+  for (const b of rows){
+    const wi = b.writein || [];
+    const nm = b.writein_names || [];
+    for (let i=0;i<4;i++){
+      if (!wi[i]) continue;
+      total++;
+      const v = nm[i] || '';
+      if (v) done++;
+      html.push(`
+        <div class="card">
+          <div class="hd"><b>#${b.no}</b> · ${NAMES[i]||i}</div>
+          <img src="/writeins_img/${b.no}_${i}.jpg?t=${Date.now()}" onerror="this.style.display='none'">
+          <div class="row">
+            <input id="in_${b.no}_${i}" value="${v.replace(/"/g,'&quot;')}" placeholder="输入此处手写姓名…">
+            <button class="primary" onclick="save(${b.no},${i})">保存</button>
+          </div>
+          <div id="st_${b.no}_${i}" class="${v?'ok':''}">${v?'已录入':''}</div>
+        </div>`);
+    }
+  }
+  $("list").innerHTML = html.join("") || '<div style="color:#999">没有需要录入的另选他人</div>';
+  $("cnt").textContent = "共 " + total + " 处";
+  $("done").textContent = "已录入 " + done;
+}
+async function save(no, i){
+  const inp = $(`in_${no}_${i}`);
+  const name = inp.value.trim();
+  const r = await fetch('/api/writein',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({no,row:i,name})});
+  const j = await r.json();
+  const st = $(`st_${no}_${i}`);
+  if (j.ok){ st.textContent = name ? "已保存" : "已清空"; st.className = "ok"; load(); }
+  else { st.textContent = j.msg || "保存失败"; st.className = "miss"; }
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.tagName === 'INPUT'){
+    const id = e.target.id.split('_');
+    save(parseInt(id[1]), parseInt(id[2]));
+  }
+});
+load();
+</script>
+</body>
+</html>
